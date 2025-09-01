@@ -3,8 +3,8 @@
 ## 1. 架構與技術
 - 前端：Vue 3 + Pinia + Tailwind；大螢幕「雙 Canvas」渲染。
 - 後端：Node.js (Express/Fastify) API、Socket.io Gateway。
-- 儲存：Dev=SQLite；Prod=PostgreSQL 或 MySQL；快取/佇列：Redis（Pub/Sub、RateLimit、Job）。
-- ORM：Prisma（可在 SQLite/MySQL/PostgreSQL 間切換）。
+- 儲存：MySQL 8.0（開發和生產統一）；快取/佇列：Redis（Pub/Sub、RateLimit、Job）。
+- ORM：Prisma（可在 SQLite/MySQL/MySQL 8.0 間切換）。
 - 部署：Zeabur（服務：web/api/realtime/redis/db），前置 Cloudflare WAF/CDN。
 
 ## 2. 認證與授權
@@ -65,10 +65,10 @@
 - 黑名單：IP / device_hash；白名單：主持端/內網。
  - 觸發節流之 API 回應：HTTP 429；headers：`Retry-After`（秒）、`X-RateLimit-Reset`（epoch ms）；body：{ code:"RATE_LIMITED", message, retryAt }。
 
-## 6. 資料模型（PostgreSQL）
+## 6. 資料模型（MySQL 8.0）
 ```sql
 -- rooms
-id uuid pk, name text, status text, theme jsonb, created_at timestamp
+id uuid pk, name text, status text, theme JSON, created_at timestamp
 -- users
 id uuid pk, email text unique, nickname text, role text, device_hash text, created_at timestamp
 -- allowlist_users
@@ -80,7 +80,7 @@ id uuid pk, scope text, type text, pattern text, action text, created_at timesta
 -- reactions
 id uuid pk, room_id uuid fk, user_id uuid fk, emoji text, mode text, created_at timestamp
 -- audit_logs
-id uuid pk, actor_id uuid, action text, meta jsonb, created_at timestamp
+id uuid pk, actor_id uuid, action text, meta JSON, created_at timestamp
 ```
 
 - 索引：`messages(room_id, created_at)`、`messages(status)`、`reactions(room_id, created_at)`、`users(email)`、`allowlist_users(email)`。
@@ -111,8 +111,8 @@ id uuid pk, actor_id uuid, action text, meta jsonb, created_at timestamp
 - 環境變數：
 
 ```env
-DB_PROVIDER=sqlite # sqlite|postgres|mysql
-DATABASE_URL=file:./dev.db # sqlite 用路徑；其他使用標準連線字串
+DB_PROVIDER=mysql
+DATABASE_URL=mysql://root:password@localhost:3306/danmaku_live
 REDIS_URL=redis://localhost:6379
 JWT_SECRET=...
 ALLOWLIST_USERS_JSON=[{"email":"elizabeth@yongrui.tw","name":"陳畇瑾","nickname":"莎白","role":"audience"}]
@@ -124,13 +124,13 @@ RATE_LIMIT_WINDOW=3s
 ## 12. 環境與啟動（Dev/Prod）
 
 - 開發（本機）：
-  - `DB_PROVIDER=sqlite`，`DATABASE_URL=file:./dev.db`（Prisma 建立單檔 DB）
+  - `DB_PROVIDER=mysql`，本地 Docker 或直接連 Zeabur MySQL
   - `REDIS_URL=redis://localhost:6379`（啟用以支援節流/事件聚合）
-  - 不需外部 DB/雲服務，即可完整開發前端與即時互動
+  - 使用 Prisma 管理 MySQL schema 和 migrations
 - 上線（Zeabur/雲端）：
-  - `DB_PROVIDER=postgres` 或 `mysql`，設定對應 `DATABASE_URL`
+  - Zeabur 一鍵部署 MySQL 8.0 服務
   - Redis 為標配（RateLimit、Pub/Sub、Job）
-  - 以 Prisma schema/migrate 管理資料庫，零停機升級
+  - 環境變數自動注入，零配置部署
 
 ## 11. 測試策略
 
@@ -138,3 +138,34 @@ RATE_LIMIT_WINDOW=3s
 - 整合：API→Moderation→Redis→WS；重連與重送。
 - E2E：100 並發用戶，連續 10 分鐘；P95 ≤ 1s。
 - 安全：XSS、表情白名單繞過測試；滲透基礎掃描。
+
+### (API|介面|接口).*(規格|規範)|API 規格|API 介面
+**Idempotency 與節流回應**  
+- `POST /api/rooms/:id/messages` 必須接受 Header：`Idempotency-Key`（UUIDv4）。同一 key 重送須回傳相同結果且不重複入列。  
+- 超出節流回傳 `429 Too Many Requests`，Headers：`Retry-After`（秒）、`X-RateLimit-Reset`（epoch ms）。  
+- 同步透過 WebSocket 發送 `rate.limited { reason, retryAt }` 事件給客戶端。
+
+### WebSocket|即時.*(通訊|通信)|Socket\.?IO
+**WebSocket 批次廣播與時間戳**  
+- 伺服器以 **50–100ms** 為節拍合併廣播（單批 ≤ 100 則），事件：`danmu.push`，payload 為陣列。  
+- 每則訊息增加 `serverTime`（epoch ms）以供端到端延遲量測與動畫對齊。  
+- 事件命名：  
+  - C → S：`user.login { token }`、`danmu.send { content }`、`heartbeat`  
+  - S → C：`danmu.push [{...}]`、`system.slowmode { on, reason }`、`system.pause { on }`、`rate.limited { reason, retryAt }`
+
+### (資料|数据).*(結構|架構)|Redis
+**Redis 資料結構與保留**  
+- 優先使用 Redis **Stream**：`XADD danmaku:main MAXLEN ~ 1000 * id <uuid> content <text> nickname <text> authorHash <hash> roomId main serverTime <ms>`。  
+- 使用者狀態：`users:{email}`（TTL 2h），連線映射：`connections:{socketId} -> email`（TTL 1h）。  
+- **資料保留**：所有與活動相關的 key 於 **T+1 天** 自動過期（TTL）。
+
+### (Rate.?Limit|節流|頻率限制)
+**節流與錯誤回應**  
+- 使用 **Token Bucket**：每使用者 1 rps、burst 3；房間高峰自動啟用慢速模式（5–10s/則/人）。  
+- 觸發節流：HTTP 回 `429`（含 `Retry-After`、`X-RateLimit-Reset`），WebSocket 發 `rate.limited`。  
+- 去重：同一使用者 2 秒內完全相同內容丟棄（以 `authorHash + normalizedContent` 為鍵）。
+
+## 部署|Deployment
+**部署與擴充注意事項**  
+- 多實例部署需使用 **socket.io-redis-adapter**，並在負載均衡層啟用 **黏著連線（sticky sessions）**。  
+- 反向代理（Nginx/Cloudflare）需開啟 WebSocket 支援並調整 `ping_timeout/ping_interval`（例如 20s/25s）。

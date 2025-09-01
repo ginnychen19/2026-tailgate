@@ -1,81 +1,74 @@
 # 2026 尾牙即時彈幕系統
 
+一個含管理後台、觀眾互動與大螢幕顯示的即時彈幕系統。
+
 ## 專案結構
 
 ```
 2026-tailgate/
+├── backend/             # 後端：Node.js + Express + Socket.io + Prisma(MySQL)
 ├── frontend/            # 前端：Vue 3 + Pinia + Tailwind + Vite
-├── backend/             # 後端：Node.js + Express/Fastify + Socket.io
 ├── spec_doct/           # 需求/技術規格/使用者故事
-├── pic/                 # 設計參考圖片
-└── README.md
+├── zeabur.yaml          # Zeabur 部署設定
+├── QUICK_START.md       # 快速啟動指南（詳細）
+└── ZEABUR_SETUP.md      # Zeabur 設定指南
 ```
 
-## 本地開發（Local Dev）
+## 快速開始（最常用）
 
-### 先決條件
-- Node.js 18+（建議 20+）
-- Redis（本機或 Docker）
+> 推薦使用 Zeabur 資料庫服務；第一次或調整 schema 時需同步資料庫。
 
-安裝 Redis（Windows 可用 Docker）：
-```bash
-docker run --name redis -p 6379:6379 -d redis:7
-```
-
-### 後端（backend）
+### 每次啟動（本地開發）
+1) 啟動後端
 ```bash
 cd backend
-npm install
-# 建立 .env（範例見下方）
 npm run dev
 ```
-
-後端 .env 範例（放在 backend/.env）：
-```env
-DB_PROVIDER=sqlite # sqlite|postgres|mysql
-DATABASE_URL=file:./dev.db
-REDIS_URL=redis://localhost:6379
-JWT_SECRET=dev-secret
-ALLOWLIST_USERS_JSON=[{"email":"elizabeth@yongrui.tw","name":"陳畇瑾","nickname":"莎白","role":"audience"}]
-EMOJI_WHITELIST=👍,😂,😭,🎉
-RATE_LIMIT_MAX=1
-RATE_LIMIT_WINDOW=3s
-```
-
-### 前端（frontend，使用 Vite 開發/打包）
+2) 啟動前端（新終端機）
 ```bash
 cd frontend
-npm install
-# 建立 .env.local（範例見下方）
-npm run dev      # 由 Vite 啟動開發伺服器
+npm run dev
 ```
+3) 開啟瀏覽器
+- 前端：http://localhost:3000
+- 健康檢查：http://localhost:3001/healthz
 
-前端環境變數（frontend/.env.local）：
-```env
-VITE_API_BASE=http://localhost:3000
-VITE_WS_URL=ws://localhost:3001
-```
-
-> 本專案前端使用 Vite 作為開發伺服器與打包工具（更快的 HMR 與精簡產出）。
-
-### 同時啟動
-- 開兩個 Terminal：一個跑 `backend`，一個跑 `frontend`。
-- 確保 Redis 正在運行（本機或 Docker）。
-
-## 建置與預覽（Frontend with Vite）
+### 首次初始化（或 schema 有調整時）
+1) 建立環境變數檔（在 backend）
 ```bash
-cd frontend
-npm run build     # Vite 打包
-npm run preview   # 本地預覽產出
+cd backend
+copy env.example .env
+```
+2) 設定 Zeabur 資料庫連線資訊
+3) 初始化資料庫
+```bash
+npm run db:init
 ```
 
-## 主要技術
-- 前端：Vue 3 + Pinia + Tailwind CSS + Vite
-- 後端：Node.js + Express/Fastify + Socket.io
-- 儲存：Dev=SQLite；Prod=PostgreSQL 或 MySQL（以 ORM 隔離）
-- 快取/佇列：Redis（RateLimit、Pub/Sub、Job）
+詳細設定請參考 [ZEABUR_SETUP.md](ZEABUR_SETUP.md)
+
+## 環境變數（後端）
+請參考 `backend/env.example`，重點為：
+- `DATABASE_URL`：MySQL 連線字串（Zeabur 格式：`mysql://username:password@host:3306/danmaku_live`）
+- `REDIS_URL`：Redis 連線字串（Zeabur 格式：`redis://host:6379`）
+- `JWT_SECRET` / `JWT_REFRESH_SECRET`
+- 用戶管理：使用 `backend/config/users.json` 檔案
+- `EMOJI_WHITELIST`、`RATE_LIMIT_*`
+
+## 生產部署（Zeabur）
+- 依 `zeabur.yaml` 建立：MySQL、Redis、backend、frontend
+- `DATABASE_URL` 由 Zeabur MySQL 自動注入
+- 後端建置步驟已包含 `prisma migrate deploy`
+- 詳見 `DEPLOY.md`
 
 ## 常見問題（FAQ）
-- 前端無法連到後端：請確認 `VITE_API_BASE`、`VITE_WS_URL` 與實際服務埠一致。
-- 429 被節流：等候 `Retry-After` 秒數再重試；或降低送訊頻率。
-- Redis 未啟動：請先啟動 Redis，或調整 `REDIS_URL` 指向可用的 Redis 服務。
+- Prisma P1001：連不上 DB → 確認 Zeabur 服務是否運行、`DATABASE_URL` 是否正確
+- Prisma P3014：shadow DB 權限不足 → 改用 `npm run db:push`
+- 前端無法連線：確認後端 3001 埠、CORS、或防火牆設定
+
+## 主要技術
+- 前端：Vue 3、Pinia、Tailwind CSS、Vite
+- 後端：Express、Socket.io、Prisma（MySQL）
+- 快取：Redis
+
+更多內容：請見 `QUICK_START.md`（詳）與 `ZEABUR_SETUP.md`（Zeabur 設定指南）。

@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id        String   @id @default(uuid())
+  name      String
+  status    String   @default("active") // active, paused, closed
+  theme     Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  messages  Message[]
+  reactions Reaction[]
+
+  @@map("rooms")
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  name       String?
+  nickname   String?
+  role       String   @default("audience") // audience, host, moderator, admin
+  deviceHash String?  @map("device_hash")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  messages  Message[]
+  reactions Reaction[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+model AllowlistUser {
+  email     String   @id
+  name      String
+  nickname  String?
+  role      String   @default("audience")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("allowlist_users")
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  roomId    String   @map("room_id")
+  userId    String   @map("user_id")
+  content   String   @db.Text
+  anonymous Boolean  @default(false)
+  status    String   @default("pending") // pending, approved, rejected
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([status])
+  @@map("messages")
+}
+
+model ModerationRule {
+  id        String   @id @default(uuid())
+  scope     String   // global, room
+  type      String   // keyword, regex
+  pattern   String
+  action    String   // pending, reject
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("moderation_rules")
+}
+
+model Reaction {
+  id        String   @id @default(uuid())
+  roomId    String   @map("room_id")
+  userId    String   @map("user_id")
+  emoji     String
+  mode      String   @default("rain") // rain, burst
+  createdAt DateTime @default(now()) @map("created_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@map("reactions")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?  @map("actor_id")
+  action    String
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}

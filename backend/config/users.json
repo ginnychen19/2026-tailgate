@@ -1,0 +1,20 @@
+[
+  {
+    "email": "elizabeth@yongrui.tw",
+    "name": "陳畇瑾",
+    "nickname": "莎白",
+    "role": "audience"
+  },
+  {
+    "email": "admin@yongrui.tw",
+    "name": "Admin",
+    "nickname": "Admin",
+    "role": "admin"
+  },
+  {
+    "email": "test@example.com",
+    "name": "測試用戶",
+    "nickname": "測試",
+    "role": "audience"
+  }
+]

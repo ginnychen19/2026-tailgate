@@ -1,0 +1,43 @@
+services:
+  # 後端 API 服務
+  backend:
+    source:
+      - backend
+    variables:
+      NODE_ENV: production
+      PORT: 3001
+      # Database will be injected by Zeabur MySQL service
+      # Redis will be injected by Zeabur Redis service
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      ALLOWLIST_USERS_JSON: ${ALLOWLIST_USERS_JSON}
+      EMOJI_WHITELIST: "👍,😂,😭,🎉"
+      RATE_LIMIT_MAX: 1
+      RATE_LIMIT_WINDOW: 3000
+    build:
+      - npm install
+      - npx prisma generate
+      - npx prisma migrate deploy
+    start: npm start
+
+  # 前端服務
+  frontend:
+    source:
+      - frontend
+    variables:
+      NODE_ENV: production
+    build:
+      - npm install
+      - npm run build
+    start: npm run preview
+
+  # MySQL 資料庫服務
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: danmaku_live
+
+  # Redis 快取服務
+  redis:
+    image: redis:7-alpine
